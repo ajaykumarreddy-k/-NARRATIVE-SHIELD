@@ -4,12 +4,12 @@ NarrativeShield — FastAPI Backend
 uv run uvicorn main:app --reload --port 8000
 
 Endpoints:
-  GET  /                 — sanity check
-  GET  /health           — system status
-  POST /analyze          — main analysis
-  GET  /models           — available Ollama models
-  GET  /patterns/count   — loaded pattern count
-  GET  /docs             — Swagger UI (auto-generated)
+  GET  /api/              — sanity check
+  GET  /api/health        — system status
+  POST /api/analyze       — main analysis
+  GET  /api/models        — available Ollama models
+  GET  /api/patterns/count — loaded pattern count
+  GET  /docs              — Swagger UI (auto-generated)
 
 Ollama is auto-started on startup if not already running.
 """
@@ -22,11 +22,8 @@ import shutil
 from contextlib import asynccontextmanager
 
 # ── Fix imports: works regardless of CWD ─────────────────────────────────────
-BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
-PARSER_DIR = os.path.join(BASE_DIR, "parser")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-if PARSER_DIR not in sys.path:
-    sys.path.insert(0, PARSER_DIR)
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
@@ -103,7 +100,7 @@ async def lifespan(app: FastAPI):
     if models:
         print(f"[Ollama]   Models: {', '.join(models)}")
     else:
-        print("[Ollama]   No models — stat-only fallback mode")
+        print("[Ollama]   No models — Gemini/stat-only fallback mode")
 
     mode = _get_llm_mode()
     print(f"[Pipeline] LLM mode  : {mode.upper()}")
@@ -144,6 +141,7 @@ class AnalyzeRequest(BaseModel):
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/")
+@app.get("/api/")
 def root():
     """Sanity check — API is live."""
     return {
@@ -153,15 +151,32 @@ def root():
     }
 
 
+@app.get("/health")
+@app.get("/api/health")
+def health():
+    """System health status."""
+    models = _get_available_models()
+    mode = _get_llm_mode()
+    return {
+        "status":       "healthy",
+        "llm_mode":     mode,
+        "db_available": DB_AVAILABLE,
+        "gemini_ready": GEMINI_AVAILABLE,
+        "ollama_models": len(models),
+        "pattern_count": len(INLINE_PATTERNS),
+    }
+
+
 @app.post("/analyze")
+@app.post("/api/analyze")
 def analyze(req: AnalyzeRequest):
     """Run full 3-layer analysis pipeline."""
     text = req.text.strip()
     api_key = req.api_key.strip()
-    
-    if not text or not api_key:
-        raise HTTPException(status_code=400, detail="Text and API key are required")
-        
+
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
+
     if len(text) > 10_000:
         raise HTTPException(status_code=400, detail="Text too long — max 10,000 chars")
 
@@ -174,6 +189,7 @@ def analyze(req: AnalyzeRequest):
 
 
 @app.get("/models")
+@app.get("/api/models")
 def list_models():
     """List Ollama models on this machine."""
     models = _get_available_models()
@@ -185,6 +201,7 @@ def list_models():
 
 
 @app.get("/patterns/count")
+@app.get("/api/patterns/count")
 def pattern_count():
     """How many malign patterns are loaded."""
     return {

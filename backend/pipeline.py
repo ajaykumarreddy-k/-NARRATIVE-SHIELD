@@ -198,14 +198,15 @@ def _text_hash(text: str) -> str:
 
 
 # ── MASTER PIPELINE ───────────────────────────────────────────────────────────
-
-from gemini_layer import analyze_with_gemini
-from db_matcher import match_patterns
-from statistical_engine import compute_statistical_score
+# NOTE: Do NOT add unconditional imports here — use the conditional
+# DB_AVAILABLE / GEMINI_AVAILABLE flags set at the top of this file.
 
 def analyze_text(text: str, api_key: str = None) -> dict[str, Any]:
     """
     Full 3-layer analysis pipeline.
+    Uses conditional flags to gracefully degrade:
+      - GEMINI_AVAILABLE → uses Gemini; else tries Ollama; else stat-only
+      - DB_AVAILABLE     → uses db_matcher; else uses inline patterns
     """
     t_start = time.time()
     if not text or not text.strip():
@@ -215,19 +216,57 @@ def analyze_text(text: str, api_key: str = None) -> dict[str, Any]:
     l1 = compute_statistical_score(text)
     pre_score = l1["pre_score"]
 
-    # ── LAYER 2: Gemini 1.5 Flash Analysis (Forced) ───────────────────────
-    l2 = analyze_with_gemini(text, api_key, pre_score)
-    l2_source = "gemini"
+    # ── LAYER 2: LLM Analysis (Gemini → Ollama → Statistical fallback) ───
+    l2 = None
+    l2_source = "offline"
+
+    if GEMINI_AVAILABLE and api_key:
+        try:
+            l2 = analyze_with_gemini(text, api_key, pre_score)
+            l2_source = "gemini"
+            print("[Pipeline] Layer 2 → Gemini ✓")
+        except Exception as e:
+            print(f"[Pipeline] Gemini failed: {e} — trying Ollama fallback")
+
+    if l2 is None:
+        # Try Ollama as fallback
+        try:
+            l2 = analyze_with_ollama(text, pre_score)
+            l2_source = "ollama"
+            print("[Pipeline] Layer 2 → Ollama ✓")
+        except Exception as e:
+            print(f"[Pipeline] Ollama failed: {e} — using stat-only fallback")
+
+    if l2 is None:
+        # Final fallback: derive from statistical score only
+        l2 = {
+            "ai_probability": int(pre_score),
+            "manipulation_score": int(pre_score * 0.8),
+            "flagged_phrases": [],
+            "narrative_technique": "Statistical Only",
+            "confidence": "low",
+            "summary": f"LLM unavailable. Statistical pre-score: {pre_score}/100.",
+        }
+        l2_source = "statistical_fallback"
 
     # ── LAYER 3: Pattern DB Matching ──────────────────────────────────────
-    db_phrases = match_patterns(text)
+    if DB_AVAILABLE:
+        try:
+            db_phrases = match_patterns(text)
+            print(f"[Pipeline] Layer 3 → DB matcher: {len(db_phrases)} matches ✓")
+        except Exception as e:
+            print(f"[Pipeline] DB matcher error: {e} — using inline fallback")
+            db_phrases = _inline_db_match(text)
+    else:
+        db_phrases = _inline_db_match(text)
+        print(f"[Pipeline] Layer 3 → Inline fallback: {len(db_phrases)} matches")
 
     # ── MERGE phrases ─────────────────────────────────────────────────────
     gemini_phrases = l2.get("flagged_phrases", [])
-    
+
     # Existing phrases from LLM to avoid duplicates
     existing_phrases = {p.get('phrase', '').lower() for p in gemini_phrases}
-    
+
     all_phrases = []
     # Add LLM phrases first
     for p in gemini_phrases:
@@ -241,7 +280,7 @@ def analyze_text(text: str, api_key: str = None) -> dict[str, Any]:
             "severity":   p.get("severity", "MED"),
             "char_start": idx if idx != -1 else 0,
             "char_end":   (idx + len(phrase_text)) if idx != -1 else 0,
-            "source":     "gemini",
+            "source":     l2_source,
             "reason":     p.get("reason", "AI analysis flagged this narrative pattern"),
         })
 

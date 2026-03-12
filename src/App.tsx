@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Moon, Sun } from 'lucide-react';
+import { analyzeLocally } from './analysisEngine';
 
 const MarqueeTop = () => (
     <div className="bg-black h-10 flex items-center overflow-hidden border-b-4 border-black fixed top-0 w-full z-[100]">
@@ -15,35 +16,59 @@ const MarqueeTop = () => (
     </div>
 );
 
-const Header = ({ onOpenApiModal, hasApiKey, isDarkMode, toggleDarkMode }: { onOpenApiModal: () => void, hasApiKey: boolean, isDarkMode: boolean, toggleDarkMode: () => void }) => (
-    <header className="bg-white dark:bg-gray-900 h-20 border-b-4 border-black flex items-center justify-between px-6 sticky top-10 z-[90]">
-        <div className="flex items-center gap-6">
-            <h1 className="text-3xl font-black tracking-tighter flex items-center gap-2">
-                🛡️ NARRATIVESHIELD
-            </h1>
-            <div className="hidden lg:flex gap-3">
-                <button 
-                    onClick={toggleDarkMode}
-                    className="bg-white dark:bg-gray-800 px-3 py-1 border-2 border-black text-xs font-bold shadow-shSm hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all cursor-pointer flex items-center gap-2"
-                >
-                    {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
-                    {isDarkMode ? 'LIGHT' : 'DARK'}
-                </button>
-                <button 
-                    onClick={onOpenApiModal}
-                    className={`${hasApiKey ? 'bg-green dark:text-black' : 'bg-red text-white'} px-3 py-1 border-2 border-black text-xs font-bold shadow-shSm hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all cursor-pointer`}
-                >
-                    API: {hasApiKey ? 'CONNECTED' : 'MISSING KEY'}
-                </button>
-                <span className="bg-yellow dark:text-black px-3 py-1 border-2 border-black text-xs font-bold shadow-shSm">CPU: 42%</span>
-                <span className="bg-violet dark:text-black px-3 py-1 border-2 border-black text-xs font-bold shadow-shSm">LATENCY: 14MS</span>
+type BackendStatus = 'checking' | 'online' | 'offline';
+
+const Header = ({ onOpenApiModal, hasApiKey, isDarkMode, toggleDarkMode, backendStatus }: {
+    onOpenApiModal: () => void;
+    hasApiKey: boolean;
+    isDarkMode: boolean;
+    toggleDarkMode: () => void;
+    backendStatus: BackendStatus;
+}) => {
+    const statusColor = backendStatus === 'online'
+        ? 'bg-green dark:text-black'
+        : backendStatus === 'offline'
+            ? 'bg-red text-white'
+            : 'bg-yellow dark:text-black';
+    const statusLabel = backendStatus === 'online'
+        ? (hasApiKey ? 'BACKEND: ONLINE ✓' : 'BACKEND: ONLINE (NO KEY)')
+        : backendStatus === 'offline'
+            ? 'BACKEND: OFFLINE — LOCAL MODE'
+            : 'BACKEND: CHECKING...';
+
+    return (
+        <header className="bg-white dark:bg-gray-900 h-20 border-b-4 border-black flex items-center justify-between px-6 sticky top-10 z-[90]">
+            <div className="flex items-center gap-6">
+                <h1 className="text-3xl font-black tracking-tighter flex items-center gap-2">
+                    🛡️ NARRATIVESHIELD
+                </h1>
+                <div className="hidden lg:flex gap-3">
+                    <button
+                        onClick={toggleDarkMode}
+                        className="bg-white dark:bg-gray-800 px-3 py-1 border-2 border-black text-xs font-bold shadow-shSm hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all cursor-pointer flex items-center gap-2"
+                    >
+                        {isDarkMode ? <Sun size={14} /> : <Moon size={14} />}
+                        {isDarkMode ? 'LIGHT' : 'DARK'}
+                    </button>
+                    <button
+                        onClick={onOpenApiModal}
+                        className={`${statusColor} px-3 py-1 border-2 border-black text-xs font-bold shadow-shSm hover:translate-x-1 hover:translate-y-1 hover:shadow-none transition-all cursor-pointer`}
+                    >
+                        {statusLabel}
+                    </button>
+                    {backendStatus === 'offline' && (
+                        <span className="bg-violet dark:text-black px-3 py-1 border-2 border-black text-xs font-bold shadow-shSm animate-pulse">
+                            ⚡ LOCAL ENGINE ACTIVE
+                        </span>
+                    )}
+                </div>
             </div>
-        </div>
-        <div className="bg-red text-black px-4 py-1 border-2 border-black font-black text-xs transform rotate-2 shadow-shSm uppercase">
-            Cybersecurity Badge v2.4
-        </div>
-    </header>
-);
+            <div className="bg-red text-black px-4 py-1 border-2 border-black font-black text-xs transform rotate-2 shadow-shSm uppercase">
+                Cybersecurity Badge v2.4
+            </div>
+        </header>
+    );
+};
 
 const ApiKeyModal = ({ isOpen, onClose, apiKey, setApiKey }: { isOpen: boolean, onClose: () => void, apiKey: string, setApiKey: (key: string) => void }) => {
     if (!isOpen) return null;
@@ -185,7 +210,7 @@ const SidebarLeft = ({ onSelectCase }: { onSelectCase: (label: string) => void }
     </aside>
 );
 
-const SidebarRight = () => (
+const SidebarRight = ({ analysisResult }: { analysisResult: any }) => (
     <aside className="w-[320px] border-l-4 border-black h-full overflow-y-auto p-4 flex flex-col gap-6 bg-white dark:bg-gray-900 hidden xl:flex">
         <section>
             <h2 className="font-black text-lg mb-4 flex items-center gap-2">
@@ -202,18 +227,18 @@ const SidebarRight = () => (
                         </tr>
                     </thead>
                     <tbody>
-                        <tr className="border-b border-black">
-                            <td className="p-2">Indistinguishable...</td>
-                            <td className="p-2 text-red font-bold">CRITICAL</td>
-                        </tr>
-                        <tr className="border-b border-black">
-                            <td className="p-2">Major banking...</td>
-                            <td className="p-2 text-red font-bold">CRITICAL</td>
-                        </tr>
-                        <tr>
-                            <td className="p-2">Friday midnight</td>
-                            <td className="p-2 text-yellow font-bold">SUSPICIOUS</td>
-                        </tr>
+                        {analysisResult?.phrases?.slice(0, 5).map((p: any, i: number) => (
+                            <tr key={i} className="border-b border-black">
+                                <td className="p-2 truncate max-w-[150px]">{p.phrase}</td>
+                                <td className={`p-2 font-bold ${p.severity === 'HIGH' ? 'text-red' : p.severity === 'MED' ? 'text-yellow' : 'text-violet'}`}>
+                                    {p.severity}
+                                </td>
+                            </tr>
+                        )) || (
+                            <tr>
+                                <td colSpan={2} className="p-2 text-center text-gray-500 italic">No threats scanned yet</td>
+                            </tr>
+                        )}
                     </tbody>
                 </table>
             </div>
@@ -221,7 +246,7 @@ const SidebarRight = () => (
             <div className="bg-cream dark:bg-gray-800 p-4 neo-border shadow-shSm mb-6">
                 <h3 className="font-black text-xs mb-2 uppercase">AI Summary</h3>
                 <p className="text-[11px] leading-tight italic font-medium dark:text-gray-300">
-                    The input exhibits classic patterns of financial FUD (Fear, Uncertainty, Doubt). High-pressure temporal constraints typical of phishing.
+                    {analysisResult?.summary || "Submit content to generate a tactical intelligence summary."}
                 </p>
             </div>
 
@@ -278,32 +303,82 @@ export default function App() {
     const [apiKey, setApiKey] = useState("");
     const [isApiModalOpen, setIsApiModalOpen] = useState(false);
     const [isDarkMode, setIsDarkMode] = useState(false);
+    const [backendStatus, setBackendStatus] = useState<BackendStatus>('checking');
 
+    // ── Dark mode ──────────────────────────────────────────────────────────
     useEffect(() => {
-        if (isDarkMode) {
-            document.documentElement.classList.add('dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-        }
+        document.documentElement.classList.toggle('dark', isDarkMode);
     }, [isDarkMode]);
 
-    const toggleDarkMode = () => setIsDarkMode(!isDarkMode);
+    const toggleDarkMode = () => setIsDarkMode(prev => !prev);
 
-    const handleAnalyze = () => {
-        if (!inputText) return;
-        if (!apiKey) {
-            setIsApiModalOpen(true);
-            return;
+    // ── Backend health check — runs on mount and every 10 seconds ──────────
+    const checkBackendHealth = useCallback(async () => {
+        try {
+            const resp = await fetch('/api/health', { method: 'GET', signal: AbortSignal.timeout(3000) });
+            setBackendStatus(resp.ok ? 'online' : 'offline');
+        } catch {
+            setBackendStatus('offline');
         }
+    }, []);
+
+    useEffect(() => {
+        checkBackendHealth();
+        const interval = setInterval(checkBackendHealth, 10000);
+        return () => clearInterval(interval);
+    }, [checkBackendHealth]);
+
+    const [analysisResult, setAnalysisResult] = useState<any>(null);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+    const handleAnalyze = async () => {
+        if (!inputText.trim()) return;
         setStatus("processing");
         setProcessStep(1);
-        
-        setTimeout(() => setProcessStep(2), 1200);
-        setTimeout(() => setProcessStep(3), 2400);
+        setErrorMessage(null);
+
+        // ── LAYER 1: Run local JS engine immediately (always works) ──────
+        const localResult = analyzeLocally(inputText);
+
+        setTimeout(() => setProcessStep(2), 800);
+        setTimeout(() => setProcessStep(3), 1800);
+
+        // ── LAYER 2+3: Try to upgrade with Gemini via backend ───────────
+        if (backendStatus === 'online' && apiKey) {
+            try {
+                const response = await fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: inputText, api_key: apiKey }),
+                    signal: AbortSignal.timeout(15000),
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    setTimeout(() => {
+                        setAnalysisResult(data);
+                        setStatus('completed');
+                        setProcessStep(0);
+                    }, 2600);
+                    return; // backend succeeded — done
+                }
+            } catch (err) {
+                console.warn('[NarrativeShield] Backend call failed, using local engine:', err);
+                // fall through to local result below
+            }
+        }
+
+        // ── FALLBACK: Use local analysis result ──────────────────────────
+        // Show a subtle note if no API key was provided
+        if (!apiKey && backendStatus === 'online') {
+            setErrorMessage(null); // not an error, just local mode
+        }
+
         setTimeout(() => {
-            setStatus("completed");
+            setAnalysisResult(localResult);
+            setStatus('completed');
             setProcessStep(0);
-        }, 3600);
+        }, 2600);
     };
 
     const handleCaseSelect = (label: string) => {
@@ -323,7 +398,7 @@ export default function App() {
     return (
         <div className="min-h-screen flex flex-col font-sans text-black dark:text-gray-100 pt-10 pb-10">
             <MarqueeTop />
-            <Header onOpenApiModal={() => setIsApiModalOpen(true)} hasApiKey={!!apiKey} isDarkMode={isDarkMode} toggleDarkMode={toggleDarkMode} />
+            <Header onOpenApiModal={() => setIsApiModalOpen(true)} hasApiKey={!!apiKey} isDarkMode={isDarkMode} toggleDarkMode={toggleDarkMode} backendStatus={backendStatus} />
             <Hero />
             <HowItWorks />
 
@@ -341,12 +416,28 @@ export default function App() {
 
                     <div className="bg-white dark:bg-gray-900 neo-border-bold shadow-shMd p-6">
                         <h2 className="font-black text-xl mb-4 uppercase">Terminal Input</h2>
-                        <textarea 
+                        <textarea
                             value={inputText}
                             onChange={(e) => setInputText(e.target.value)}
-                            placeholder="Paste suspicious text, transcripts, or articles here..."
+                            placeholder="Paste suspicious text, transcripts, or articles here for analysis..."
                             className="w-full h-40 neo-border p-4 font-mono text-sm focus:ring-0 focus:border-black resize-none bg-cream dark:bg-gray-800 dark:text-gray-100"
                         />
+                        <div className="mt-2 flex items-center justify-between">
+                            <span className="text-[10px] font-mono text-gray-500 dark:text-gray-400">
+                                {backendStatus === 'online' && apiKey
+                                    ? '⚡ Gemini AI + local engine ready'
+                                    : backendStatus === 'online' && !apiKey
+                                        ? '📊 Local engine active — add Gemini key for full analysis'
+                                        : '📊 Offline mode — local statistical engine + pattern DB'
+                                }
+                                {!apiKey && (
+                                    <button onClick={() => setIsApiModalOpen(true)} className="ml-2 underline hover:text-black dark:hover:text-white transition-colors">
+                                        + Add Gemini key
+                                    </button>
+                                )}
+                            </span>
+                            <span className="text-[10px] font-mono text-gray-400">{inputText.length} chars</span>
+                        </div>
                         <div className="mt-4 flex justify-end">
                             <button 
                                 onClick={handleAnalyze}
@@ -357,6 +448,19 @@ export default function App() {
                             </button>
                         </div>
                     </div>
+
+                    {errorMessage && (
+                        <div className="bg-red/20 border-2 border-red p-4 neo-border shadow-shSm fade-in flex justify-between items-center">
+                            <div>
+                                <div className="font-black text-xs uppercase text-red mb-1">⚠ CONNECTION ERROR</div>
+                                <div className="font-mono text-sm">{errorMessage}</div>
+                            </div>
+                            <button 
+                                onClick={() => setErrorMessage(null)} 
+                                className="font-black text-lg hover:text-red transition-colors px-2"
+                            >✕</button>
+                        </div>
+                    )}
 
                     {status === 'processing' && (
                         <div className="bg-black text-white p-6 neo-border shadow-shMd fade-in">
@@ -379,58 +483,112 @@ export default function App() {
                         </div>
                     )}
 
-                    {status === 'completed' && (
+                    {status === 'completed' && analysisResult && (
                         <div className="flex flex-col gap-6 fade-in">
-                            <div className="bg-red text-black p-4 neo-border-bold shadow-shMd flex items-center justify-between">
+                            <div className={`${
+                                analysisResult.verdict === 'HIGH_RISK' ? 'bg-red' :
+                                analysisResult.verdict === 'MEDIUM_RISK' ? 'bg-yellow' : 'bg-green'
+                            } text-black p-4 neo-border-bold shadow-shMd flex items-center justify-between`}>
                                 <div>
                                     <div className="text-xs font-black uppercase tracking-widest">Global Verdict</div>
-                                    <div className="text-3xl font-black italic">HIGH PROBABILITY OF MANIPULATION</div>
+                                    <div className="text-3xl font-black italic">{(analysisResult.verdict_sub || '').toUpperCase()}</div>
+                                    <div className="mt-1">
+                                        <span className={`text-[10px] font-black px-2 py-0.5 border border-black ${
+                                            analysisResult.model_used?.startsWith('gemini') ? 'bg-green' :
+                                            analysisResult.model_used === 'ollama' ? 'bg-yellow' : 'bg-violet'
+                                        } text-black`}>
+                                            {analysisResult.model_used?.startsWith('gemini') ? '⚡ GEMINI AI + LOCAL'
+                                             : analysisResult.model_used === 'ollama' ? '🦙 OLLAMA + LOCAL'
+                                             : '📊 LOCAL ENGINE (OFFLINE)'}
+                                        </span>
+                                    </div>
                                 </div>
                                 <div className="bg-white p-2 neo-border">
-                                    <span className="text-4xl font-black text-black">89%</span>
+                                    <span className="text-4xl font-black text-black">{analysisResult.ai_probability}%</span>
                                 </div>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="bg-white dark:bg-gray-900 neo-border shadow-shSm p-4 grid grid-cols-2 gap-4 font-mono">
                                     <div className="border-r-2 border-black pr-4">
-                                        <div className="text-[10px] font-black uppercase text-gray-500 dark:text-gray-400">Emotional Bias</div>
-                                        <div className="text-xl font-bold">Aggressive</div>
+                                        <div className="text-[10px] font-black uppercase text-gray-500 dark:text-gray-400">Technique</div>
+                                        <div className="text-xl font-bold">{analysisResult.technique}</div>
                                     </div>
                                     <div>
-                                        <div className="text-[10px] font-black uppercase text-gray-500 dark:text-gray-400">Factual Density</div>
-                                        <div className="text-xl font-bold">Low (12%)</div>
+                                        <div className="text-[10px] font-black uppercase text-gray-500 dark:text-gray-400">Confidence</div>
+                                        <div className="text-xl font-bold">{analysisResult.confidence.toUpperCase()}</div>
                                     </div>
                                     <div className="border-r-2 border-black pr-4 pt-4 mt-2 border-t-2">
-                                        <div className="text-[10px] font-black uppercase text-gray-500 dark:text-gray-400">Source Credibility</div>
-                                        <div className="text-xl font-bold text-red">Unverified</div>
+                                        <div className="text-[10px] font-black uppercase text-gray-500 dark:text-gray-400">Stat Score</div>
+                                        <div className="text-xl font-bold">{analysisResult.stat_score}%</div>
                                     </div>
                                     <div className="pt-4 mt-2 border-t-2">
-                                        <div className="text-[10px] font-black uppercase text-gray-500 dark:text-gray-400">Temporal Urgency</div>
-                                        <div className="text-xl font-bold">Critical</div>
+                                        <div className="text-[10px] font-black uppercase text-gray-500 dark:text-gray-400">Processing</div>
+                                        <div className="text-xl font-bold">{analysisResult.proc_time}</div>
                                     </div>
                                 </div>
                                 <div className="bg-white dark:bg-gray-900 neo-border shadow-shSm p-4 flex justify-around items-center">
-                                    <DonutGauge value={92} label="AI Synthesis" color="#C4B5FD" />
-                                    <DonutGauge value={78} label="Logical Fallacy" color="#FF6B6B" />
+                                    <DonutGauge value={analysisResult.ai_probability} label="AI Synthesis" color="#C4B5FD" />
+                                    <DonutGauge value={analysisResult.manipulation_score} label="Manipulation" color="#FF6B6B" />
                                 </div>
                             </div>
 
                             <div className="bg-cream dark:bg-gray-800 neo-border p-6 shadow-shSm relative overflow-hidden">
-                                <div className="absolute top-0 right-0 bg-black text-white px-2 py-1 text-[10px] font-bold">TEXT_MAP_V1</div>
+                                <div className="absolute top-0 right-0 bg-black text-white px-2 py-1 text-[10px] font-bold">ANNOTATED_MAP</div>
                                 <h3 className="font-black mb-4 underline uppercase">Annotated Analysis</h3>
                                 <div className="leading-relaxed font-mono text-sm">
-                                    Artificial intelligence has now reached a point where reality is <span className="bg-yellow dark:text-black border border-black px-1 cursor-help group relative">indistinguishable from fabrication<span className="hidden group-hover:block absolute bottom-full left-0 mb-2 p-2 bg-black text-white text-[10px] w-48 z-10 neo-border shadow-shSm">Hyperbolic claim: Designed to create a sense of helplessness.</span></span>. 
-                                    Recent reports suggest that <span className="bg-red/40 dark:bg-red/60 border border-black px-1 cursor-help group relative">major banking institutions are liquidating<span className="hidden group-hover:block absolute bottom-full left-0 mb-2 p-2 bg-black text-white text-[10px] w-48 z-10 neo-border shadow-shSm">Factual Inaccuracy: No market data supports this liquidation event.</span></span> all gold assets by Friday midnight. 
-                                    This is a <span className="bg-violet/40 dark:bg-violet/60 border border-black px-1 cursor-help group relative">mandatory directive<span className="hidden group-hover:block absolute bottom-full left-0 mb-2 p-2 bg-black text-white text-[10px] w-48 z-10 neo-border shadow-shSm">Authority Mimicry: Uses official language to bypass skepticism.</span></span> from the central board. 
-                                    <span className="bg-red/40 dark:bg-red/60 border border-black px-1">Do not verify, just act immediately</span> to secure your personal funds before the blackout.
+                                    {(() => {
+                                        let lastIdx = 0;
+                                        const elements = [];
+                                        const phrases = [...analysisResult.phrases].sort((a, b) => a.char_start - b.char_start);
+                                        
+                                        phrases.forEach((p, i) => {
+                                            // Normal text before highlight
+                                            if (p.char_start > lastIdx) {
+                                                elements.push(inputText.substring(lastIdx, p.char_start));
+                                            }
+                                            // Highlighted text
+                                            elements.push(
+                                                <span key={i} className={`border-2 px-1 cursor-help group relative inline ${
+                                                    p.category === 'prompt_injection'
+                                                        ? 'bg-red/60 dark:bg-red/80 border-red animate-pulse'
+                                                        : p.category === 'ai_structural'
+                                                            ? 'bg-violet/40 dark:bg-violet/60 border-violet'
+                                                            : p.severity === 'HIGH'
+                                                                ? 'bg-red/40 dark:bg-red/60 border-red'
+                                                                : p.severity === 'MED'
+                                                                    ? 'bg-yellow/40 dark:bg-yellow/60 border-yellow'
+                                                                    : 'bg-violet/30 dark:bg-violet/50 border-violet'
+                                                }`}>
+                                                    {inputText.substring(p.char_start, p.char_end)}
+                                                    <span className="hidden group-hover:block absolute bottom-full left-0 mb-2 p-2 bg-black text-white text-[10px] w-56 z-10 neo-border shadow-shSm">
+                                                        <span className={`block font-black mb-1 ${
+                                                            p.category === 'prompt_injection' ? 'text-red' :
+                                                            p.category === 'ai_structural' ? 'text-violet' : 'text-yellow'
+                                                        }`}>
+                                                            [{p.catLabel || p.category}] {p.severity}
+                                                        </span>
+                                                        {p.reason}
+                                                    </span>
+                                                </span>
+                                            );
+                                            lastIdx = p.char_end;
+                                        });
+                                        
+                                        // Remaining text
+                                        if (lastIdx < inputText.length) {
+                                            elements.push(inputText.substring(lastIdx));
+                                        }
+                                        
+                                        return elements;
+                                    })()}
                                 </div>
                             </div>
                         </div>
                     )}
                 </main>
 
-                <SidebarRight />
+                <SidebarRight analysisResult={analysisResult} />
             </section>
 
             <section className="bg-yellow dark:bg-yellow-600 py-20 px-6 border-b-4 border-black">

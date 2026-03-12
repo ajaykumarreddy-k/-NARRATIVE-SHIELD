@@ -1,16 +1,35 @@
+"""
+NarrativeShield — Gemini AI Layer (Layer 2)
+============================================
+Uses Google's Generative AI SDK to analyze text for manipulation patterns.
+Falls back gracefully with an error-response dict so the UI never crashes.
+"""
+
 import google.generativeai as genai
 import json
 
+
 def analyze_with_gemini(text: str, api_key: str, pre_score: float) -> dict:
+    """
+    Analyze text using Google Gemini API.
+
+    Args:
+        text:      The input text to analyze
+        api_key:   User-provided Gemini API key
+        pre_score: Layer 1 statistical pre-score (0-100)
+
+    Returns:
+        JSON dict matching the pipeline schema.
+    """
     # 1. Guardrail for missing keys
     if not api_key or api_key.strip() == "":
-        print("Error: API Key is empty")
-        return get_error_response("Missing API Key. Please enter a valid Google Gemini API Key.")
+        print("[GeminiLayer] Error: API Key is empty")
+        return _error_response("Missing API Key. Please enter a valid Google Gemini API Key.")
 
     try:
         # 2. Dynamically configure Gemini with the user's provided key
         genai.configure(api_key=api_key)
-        
+
         # 3. The Ironclad Prompt (includes injection defense)
         system_instruction = f"""
         You are an expert AI disinformation forensics analyst. 
@@ -32,12 +51,17 @@ def analyze_with_gemini(text: str, api_key: str, pre_score: float) -> dict:
           "summary": "<1-2 sentence summary>"
         }}
         """
-        
-        # 4. The 404-Bypass Loop
-        # We try the most stable aliases in order until one succeeds
-        model_aliases = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.5-pro-latest"]
+
+        # 4. Model alias fallback chain — try most current models first
+        model_aliases = [
+            "gemini-2.0-flash",           # Current fast model
+            "gemini-2.0-flash-lite",      # Lightweight fallback
+            "gemini-1.5-flash",           # Legacy stable fallback
+            "gemini-1.5-flash-latest",    # Legacy alias
+            "gemini-1.5-pro-latest",      # Pro as last resort
+        ]
         response = None
-        
+
         for model_name in model_aliases:
             try:
                 model = genai.GenerativeModel(
@@ -45,29 +69,93 @@ def analyze_with_gemini(text: str, api_key: str, pre_score: float) -> dict:
                     system_instruction=system_instruction,
                     generation_config={"response_mime_type": "application/json"}
                 )
-                response = model.generate_content(text)
-                print(f"[Success] Connected using model: {model_name}")
-                break # Stop the loop once we get a successful response
+                response = model.generate_content(text[:3000])
+                print(f"[GeminiLayer] ✓ Connected using model: {model_name}")
+                break  # Stop the loop once we get a successful response
             except Exception as alias_error:
-                print(f"[Warning] Model {model_name} failed: {alias_error}")
-                continue # Try the next one in the list
-        
+                print(f"[GeminiLayer] Model {model_name} failed: {alias_error}")
+                continue  # Try the next one in the list
+
         if not response:
-             raise Exception("All model aliases returned 404 or failed. Check API Key permissions.")
+            raise Exception("All model aliases failed. Check API Key permissions or quota.")
 
-        return json.loads(response.text)
-        
+        # 5. Parse and validate
+        parsed = json.loads(response.text)
+        return _validate(parsed, pre_score)
+
+    except json.JSONDecodeError as e:
+        print(f"[GeminiLayer] JSON parse error: {e}")
+        # Try to extract JSON from response text
+        if response and response.text:
+            import re
+            match = re.search(r'\{.*\}', response.text, re.DOTALL)
+            if match:
+                try:
+                    return _validate(json.loads(match.group(0)), pre_score)
+                except Exception:
+                    pass
+        return _error_response(f"Failed to parse Gemini response as JSON.")
+
     except Exception as e:
-        print(f"Gemini Final API Error: {e}")
-        return get_error_response(f"API Error: {str(e)}")
+        print(f"[GeminiLayer] Final API Error: {e}")
+        return _error_response(f"API Error: {str(e)}")
 
-def get_error_response(error_message: str) -> dict:
-    # Safe fallback so the frontend UI doesn't crash during a demo
+
+def _validate(parsed: dict, pre_score: float) -> dict:
+    """Ensure all required fields exist with correct types."""
+    ai_prob = parsed.get("ai_probability", int(pre_score))
+    if not isinstance(ai_prob, (int, float)):
+        ai_prob = int(pre_score)
+    ai_prob = max(0, min(100, int(ai_prob)))
+
+    manip = parsed.get("manipulation_score", int(pre_score * 0.9))
+    if not isinstance(manip, (int, float)):
+        manip = int(pre_score * 0.9)
+    manip = max(0, min(100, int(manip)))
+
+    raw_phrases = parsed.get("flagged_phrases", [])
+    phrases = []
+    if isinstance(raw_phrases, list):
+        for p in raw_phrases:
+            if isinstance(p, dict) and "phrase" in p:
+                sev = p.get("severity", "MED")
+                if sev not in ("HIGH", "MED", "LOW"):
+                    sev = "MED"
+                phrases.append({
+                    "phrase":   str(p.get("phrase", ""))[:100],
+                    "reason":   str(p.get("reason", "Suspicious pattern"))[:200],
+                    "severity": sev,
+                })
+
+    technique = parsed.get("narrative_technique", "Unknown")
+    if not isinstance(technique, str) or not technique.strip():
+        technique = "Unknown"
+
+    conf = parsed.get("confidence", "medium")
+    if conf not in ("low", "medium", "high"):
+        conf = "medium"
+
+    summary = parsed.get("summary", "Analysis complete. Review flagged phrases for details.")
+    if not isinstance(summary, str) or len(summary) < 10:
+        summary = "Analysis complete. Review flagged phrases for details."
+
     return {
-        "ai_probability": 0, 
-        "manipulation_score": 0, 
+        "ai_probability":     ai_prob,
+        "manipulation_score": manip,
+        "flagged_phrases":    phrases,
+        "narrative_technique": technique.strip(),
+        "confidence":         conf,
+        "summary":            summary.strip(),
+    }
+
+
+def _error_response(error_message: str) -> dict:
+    """Safe fallback so the frontend UI doesn't crash during a demo."""
+    return {
+        "ai_probability": 0,
+        "manipulation_score": 0,
         "flagged_phrases": [],
-        "narrative_technique": "Connection Error", 
-        "confidence": "low", 
-        "summary": error_message
+        "narrative_technique": "Connection Error",
+        "confidence": "low",
+        "summary": error_message,
     }

@@ -1,12 +1,12 @@
 # ── Python dependencies ─────────────────────────────────────────────────────
 # Install all with: pip install -r requirements.txt
+# Or use: uv sync (reads pyproject.toml)
 
-fastapi==0.111.0
-uvicorn==0.29.0
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+pydantic>=2.0.0
+google-generativeai>=0.5.4
+python-dotenv>=1.0.1
 
 # Optional — only needed if you add textstat for richer metrics
-# textstat==0.7.3
-
-# Your teammate needs these for her modules:
-# google-generativeai==0.5.4   ← for gemini_layer.py
-# python-dotenv==1.0.1         ← for .env API key loading
+# textstat>=0.7.3
