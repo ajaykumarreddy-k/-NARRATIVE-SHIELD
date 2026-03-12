@@ -611,21 +611,11 @@ version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "google-generativeai" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "textstat" },
     { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.optional-dependencies]
-all = [
-    { name = "google-generativeai" },
-    { name = "python-dotenv" },
-    { name = "textstat" },
-]
-gemini = [
-    { name = "google-generativeai" },
-    { name = "python-dotenv" },
-]
-stats = [
-    { name = "textstat" },
 ]
 
 [package.dev-dependencies]
@@ -638,15 +628,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.111.0" },
-    { name = "google-generativeai", marker = "extra == 'all'", specifier = ">=0.5.4" },
-    { name = "google-generativeai", marker = "extra == 'gemini'", specifier = ">=0.5.4" },
-    { name = "python-dotenv", marker = "extra == 'all'", specifier = ">=1.0.1" },
-    { name = "python-dotenv", marker = "extra == 'gemini'", specifier = ">=1.0.1" },
-    { name = "textstat", marker = "extra == 'all'", specifier = ">=0.7.3" },
-    { name = "textstat", marker = "extra == 'stats'", specifier = ">=0.7.3" },
+    { name = "google-generativeai", specifier = ">=0.5.4" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "python-dotenv", specifier = ">=1.0.1" },
+    { name = "textstat", specifier = ">=0.7.3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29.0" },
 ]
-provides-extras = ["stats", "gemini", "all"]
 
 [package.metadata.requires-dev]
 dev = [

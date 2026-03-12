@@ -128,6 +128,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -137,26 +138,7 @@ app.add_middleware(
 
 class AnalyzeRequest(BaseModel):
     text: str
-    use_ollama: bool = True
-
-
-class AnalyzeResponse(BaseModel):
-    ai_probability:     int
-    manipulation_score: int
-    stat_score:         float
-    confidence:         str
-    verdict:            str
-    verdict_sub:        str
-    technique:          str
-    summary:            str
-    phrases:            list
-    explain:            list
-    layers:             dict
-    scan_id:            str
-    text_hash:          str
-    proc_time:          str
-    text_stats:         dict
-    model_used:         str
+    api_key: str
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -168,44 +150,22 @@ def root():
         "app":     "NarrativeShield API",
         "version": "1.0.0",
         "status":  "running",
-        "routes": [
-            "GET  /",
-            "GET  /health",
-            "POST /analyze",
-            "GET  /models",
-            "GET  /patterns/count",
-            "GET  /docs",
-        ],
     }
 
 
-@app.get("/health")
-def health():
-    """Full system status — layers, LLM mode, DB."""
-    ollama_models = _get_available_models()
-    mode = _get_llm_mode()
-    return {
-        "status":          "nominal",
-        "llm_mode":        mode,           # "gemini" | "ollama" | "offline"
-        "ollama":          "connected" if ollama_models else "unavailable",
-        "ollama_models":   ollama_models,
-        "gemini":          "connected" if GEMINI_AVAILABLE else "not configured",
-        "db_matcher":      "loaded"    if DB_AVAILABLE     else "using inline patterns",
-        "inline_patterns": len(INLINE_PATTERNS),
-        "timestamp":       time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    }
-
-
-@app.post("/analyze", response_model=AnalyzeResponse)
+@app.post("/analyze")
 def analyze(req: AnalyzeRequest):
     """Run full 3-layer analysis pipeline."""
     text = req.text.strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="Text cannot be empty")
+    api_key = req.api_key.strip()
+    
+    if not text or not api_key:
+        raise HTTPException(status_code=400, detail="Text and API key are required")
+        
     if len(text) > 10_000:
         raise HTTPException(status_code=400, detail="Text too long — max 10,000 chars")
 
-    result = analyze_text(text)
+    result = analyze_text(text, api_key=api_key)
 
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])

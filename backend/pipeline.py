@@ -199,132 +199,96 @@ def _text_hash(text: str) -> str:
 
 # ── MASTER PIPELINE ───────────────────────────────────────────────────────────
 
-def analyze_text(text: str) -> dict[str, Any]:
+from gemini_layer import analyze_with_gemini
+from db_matcher import match_patterns
+from statistical_engine import compute_statistical_score
+
+def analyze_text(text: str, api_key: str = None) -> dict[str, Any]:
     """
     Full 3-layer analysis pipeline.
-
-    Args:
-        text: Raw input text from the user (any length)
-
-    Returns complete result dict ready to send to frontend:
-        {
-          # Core scores
-          "ai_probability": int,
-          "manipulation_score": int,
-          "stat_score": float,
-          "confidence": str,
-          "verdict": str,
-          "verdict_sub": str,
-          "technique": str,
-          "summary": str,
-
-          # Phrase data
-          "phrases": [ {phrase, catLabel, catClass, severity, source, reason, char_start, char_end} ],
-
-          # Explainability bars
-          "explain": [ {feat, pct, color} ],
-
-          # Layer breakdown for right panel
-          "layers": {"l1": int, "l2": int, "l3": int},
-
-          # Metadata
-          "scan_id": str,
-          "text_hash": str,
-          "proc_time": str,
-          "text_stats": dict,
-          "model_used": str,
-        }
     """
     t_start = time.time()
     if not text or not text.strip():
         return {"error": "Empty text submitted"}
 
     # ── LAYER 1: Statistical Engine ───────────────────────────────────────
-    print("[Pipeline] Layer 1: Statistical fingerprinting...")
     l1 = compute_statistical_score(text)
     pre_score = l1["pre_score"]
-    print(f"[Pipeline] Layer 1 pre_score: {pre_score}")
 
-    # ── LAYER 2: LLM Analysis ─────────────────────────────────────────────
-    llm_mode = _get_llm_mode()
-    print(f"[Pipeline] Layer 2: LLM mode = {llm_mode}")
-
-    if llm_mode == "gemini":
-        l2 = analyze_with_gemini(text, pre_score=pre_score)
-        l2_source = "gemini"
-    elif llm_mode == "ollama":
-        l2 = analyze_with_ollama(text, pre_score=pre_score)
-        l2_source = l2.get("_source", "ollama")
-    else:
-        # fully offline — stat fallback already inside ollama_layer
-        from ollama_layer import _statistical_fallback
-        l2 = _statistical_fallback(pre_score, text)
-        l2_source = "offline"
-
-    print(f"[Pipeline] Layer 2 done [{l2_source}] — AI:{l2['ai_probability']} Manip:{l2['manipulation_score']}")
+    # ── LAYER 2: Gemini 1.5 Flash Analysis (Forced) ───────────────────────
+    l2 = analyze_with_gemini(text, api_key, pre_score)
+    l2_source = "gemini"
 
     # ── LAYER 3: Pattern DB Matching ──────────────────────────────────────
-    print("[Pipeline] Layer 3: Pattern matching...")
-    if DB_AVAILABLE:
-        db_phrases = match_patterns(text)
-    else:
-        db_phrases = _inline_db_match(text)
-    print(f"[Pipeline] Layer 3 matched {len(db_phrases)} phrases")
+    db_phrases = match_patterns(text)
 
     # ── MERGE phrases ─────────────────────────────────────────────────────
-    llm_phrases = l2.get("flagged_phrases", [])
-    all_phrases = _merge_phrases(db_phrases, llm_phrases, text)
-    # Sort by char_start for correct rendering order
-    all_phrases.sort(key=lambda p: p.get("char_start", 999))
+    gemini_phrases = l2.get("flagged_phrases", [])
+    
+    # Existing phrases from LLM to avoid duplicates
+    existing_phrases = {p.get('phrase', '').lower() for p in gemini_phrases}
+    
+    all_phrases = []
+    # Add LLM phrases first
+    for p in gemini_phrases:
+        phrase_text = p.get("phrase", "")
+        idx = text.lower().find(phrase_text.lower())
+        all_phrases.append({
+            "phrase":     phrase_text,
+            "category":   "llm_flagged",
+            "catLabel":   "AI Flagged",
+            "catClass":   "emo",
+            "severity":   p.get("severity", "MED"),
+            "char_start": idx if idx != -1 else 0,
+            "char_end":   (idx + len(phrase_text)) if idx != -1 else 0,
+            "source":     "gemini",
+            "reason":     p.get("reason", "AI analysis flagged this narrative pattern"),
+        })
+
+    # Add DB matches if not already flagged
+    for db_match in db_phrases:
+        if db_match['phrase'].lower() not in existing_phrases:
+            all_phrases.append({
+                "phrase":     db_match['phrase'],
+                "category":   "db_match",
+                "catLabel":   "DB Match",
+                "catClass":   "uvt",
+                "severity":   db_match['severity'],
+                "char_start": db_match['char_start'],
+                "char_end":   db_match['char_end'],
+                "source":     "db",
+                "reason":     db_match['reason'],
+            })
+
+    # Sort by char_start
+    all_phrases.sort(key=lambda p: p.get("char_start", 0))
 
     # ── DERIVE final scores ───────────────────────────────────────────────
-    ai_prob = l2["ai_probability"]
-    manip   = l2["manipulation_score"]
-
-    # Boost scores if many DB patterns matched
-    db_hit_count = len(db_phrases)
-    if db_hit_count >= 4:
-        manip   = min(manip + 10, 100)
-        ai_prob = min(ai_prob + 8, 100)
-    elif db_hit_count >= 2:
-        manip   = min(manip + 5, 100)
-
+    ai_prob = l2.get("ai_probability", 0)
+    manip   = l2.get("manipulation_score", 0)
     verdict, verdict_sub = _derive_verdict(manip, ai_prob)
 
-    # Layer scores for the breakdown bars
-    l3_score = min(db_hit_count * 12, 100)  # 0–100 based on matches
-
-    # ── BUILD final result ────────────────────────────────────────────────
     proc_ms = int((time.time() - t_start) * 1000)
 
     return {
-        # Core scores
         "ai_probability":    ai_prob,
         "manipulation_score": manip,
         "stat_score":        pre_score,
-        "confidence":        l2["confidence"],
+        "confidence":        l2.get("confidence", "low"),
         "verdict":           verdict,
         "verdict_sub":       verdict_sub,
-        "technique":         l2["narrative_technique"],
-        "summary":           l2["summary"],
-
-        # Phrase data (merged DB + LLM)
-        "phrases": all_phrases,
-
-        # Explainability bars (from Layer 1)
-        "explain": l1["feature_display"],
-
-        # Layer scores
+        "technique":         l2.get("narrative_technique", "Unknown"),
+        "summary":           l2.get("summary", "Analysis completed."),
+        "phrases":           all_phrases,
+        "explain":           l1["feature_display"],
         "layers": {
             "l1": int(pre_score),
             "l2": manip,
-            "l3": l3_score,
+            "l3": min(len(db_phrases) * 15, 100),
         },
-
-        # Metadata
         "scan_id":    _generate_scan_id(),
         "text_hash":  _text_hash(text),
         "proc_time":  f"{proc_ms / 1000:.1f}s",
         "text_stats": l1["text_stats"],
-        "model_used": l2.get("_model", l2_source),
+        "model_used": l2_source,
     }
