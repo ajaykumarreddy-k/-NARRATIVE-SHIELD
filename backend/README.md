@@ -1,122 +1,234 @@
-# NarrativeShield — Backend Setup
+# 🛡️ NarrativeShield — Backend API
 
-## YOUR FOLDER STRUCTURE
+> **SciComp v2.0 · National Level Hackathon · SIMATS Engineering, Chennai**  
+> Team: Ajay Kumar Reddy Krishnareddygari & Thanvarshini VR — SRMIST RMP  
+> Problem #06 · Cybersecurity Sub-domain · 12 March 2026
+
+---
+
+## Overview
+
+FastAPI-based backend powering the NarrativeShield 3-layer analysis pipeline:
+
+| Layer | Module | What it does |
+|---|---|---|
+| **L1** | `statistical_engine.py` | Lexical repetition, entropy, sentence uniformity — offline, <50ms |
+| **L2** | `gemini_layer.py` → `ollama_layer.py` | Gemini 2.0 Flash (primary) → Ollama (fallback) → stat-only |
+| **L3** | `db_matcher.py` | SQLite pattern DB — 32+ malign phrase matches with severity |
+
+---
+
+## Folder Structure
 
 ```
-narrativeshield/
-├── main.py                  ← FastAPI app  (YOU run this)
-├── requirements.txt
-├── .env                     ← GEMINI_API_KEY=... (teammate adds)
-└── parser/
-    ├── statistical_engine.py ← Layer 1  (YOU own this)
-    ├── ollama_layer.py       ← Layer 2a (YOU own this)
-    ├── pipeline.py           ← Master orchestrator (YOU own this)
-    ├── gemini_layer.py       ← Layer 2b (TEAMMATE adds this)
-    └── db_matcher.py         ← Layer 3  (TEAMMATE adds this)
+backend/
+├── main.py                    ← FastAPI server (run this)
+├── pipeline.py                ← 3-layer orchestrator
+├── statistical_engine.py      ← Layer 1: offline statistical fingerprinting
+├── gemini_layer.py            ← Layer 2a: Google Gemini 2.0 Flash
+├── ollama_layer.py            ← Layer 2b: Ollama local LLM fallback
+├── db_matcher.py              ← Layer 3: SQLite pattern matching (auto-seeds)
+├── pyproject.toml             ← uv project config
+├── requirements.txt           ← pip-compatible dep list
+├── llm_malign_detector/
+│   ├── narrative_shield.db    ← SQLite DB (auto-created on first run)
+│   ├── models.py
+│   ├── schemas.py
+│   └── parser_engine.py
+└── .env.example               ← Copy → .env and add your Gemini API key
 ```
 
 ---
 
-## STEP 1 — Install dependencies
+## Quick Start
+
+### 1. Install dependencies (uv — recommended)
 
 ```bash
-pip install fastapi uvicorn
+cd backend
+uv sync
 ```
 
----
+Or with pip:
 
-## STEP 2 — Make sure Ollama is running
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Start server
+
+```bash
+uv run uvicorn main:app --reload --port 8000
+```
+
+```bash
+# Verify it's running:
+curl http://localhost:8000/api/health
+```
+
+### 3. (Optional) Start Ollama for local LLM fallback
 
 ```bash
 ollama serve
-# In another terminal, check your models:
-ollama list
+ollama pull llama3.2   # or mistral, llama3.1 — engine auto-detects
 ```
 
-If you have `llama3.2` or `llama3.1` or `mistral` — you're good.
-The `ollama_layer.py` auto-detects whatever model you have.
+> The server auto-starts Ollama if the binary is in PATH and it's not already running.
 
 ---
 
-## STEP 3 — Run the server
+## API Endpoints
 
-```bash
-cd narrativeshield
-python main.py
-# OR
-uvicorn main:app --reload --port 8000
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/health` | System status — LLM mode, DB status, pattern count |
+| `POST` | `/api/analyze` | **Main endpoint** — run full 3-layer analysis |
+| `GET` | `/api/models` | List available Ollama models |
+| `GET` | `/api/patterns/count` | Loaded malign pattern count |
+| `GET` | `/docs` | Auto-generated Swagger UI |
+
+### POST `/api/analyze` — Request
+
+```json
+{
+  "text": "The elites don't want you to know...",
+  "api_key": "AIzaSy..."
+}
 ```
 
-Open http://localhost:8000/docs to see the Swagger UI.
-Open http://localhost:8000/health to check all systems.
+### POST `/api/analyze` — Response
+
+```json
+{
+  "ai_probability": 87,
+  "manipulation_score": 79,
+  "stat_score": 61.3,
+  "confidence": "high",
+  "verdict": "HIGH_RISK",
+  "verdict_sub": "Multiple manipulation techniques detected",
+  "technique": "Fear Mongering / Emotional Manipulation",
+  "summary": "Content uses tribal framing and false urgency tactics...",
+  "phrases": [
+    {
+      "phrase": "the elites",
+      "category": "us_vs_them",
+      "catLabel": "Us vs Them",
+      "severity": "HIGH",
+      "char_start": 4,
+      "char_end": 14,
+      "reason": "Tribal framing — divides audience against an out-group",
+      "source": "db_match"
+    }
+  ],
+  "explain": [
+    { "feat": "Repetition Ratio", "pct": 42, "color": "#7c3aed" }
+  ],
+  "layers": { "l1": 61, "l2": 79, "l3": 60 },
+  "scan_id": "SCN-4821",
+  "text_hash": "A3F9B2C1",
+  "proc_time": "1.2s",
+  "text_stats": { "word_count": 84, "sentence_count": 6 },
+  "model_used": "gemini"
+}
+```
 
 ---
 
-## STEP 4 — Test it
+## Pipeline Fallback Chain
+
+```
+User submits text + API key
+        │
+        ▼
+[L1] Statistical Engine ─────────────────────── always runs (<50ms)
+        │
+        ▼
+[L2] Gemini 2.0 Flash ─── fails? ──► Ollama ─── fails? ──► Stat-only fallback
+        │
+        ▼
+[L3] SQLite DB Matcher ─── not available? ──► 44-pattern inline fallback
+        │
+        ▼
+Merged result → JSON response
+```
+
+---
+
+## Database — Auto-Seeding
+
+`db_matcher.py` auto-creates and seeds `narrative_shield.db` on first import.  
+No manual setup required. Seeded with **32 patterns** across 7 categories:
+
+| Category | Examples |
+|---|---|
+| `emotional_amplifier` | "shocking truth", "wake up people" |
+| `us_vs_them` | "the elites", "deep state", "real citizens" |
+| `false_urgency` | "before it's deleted", "share immediately" |
+| `fake_authority` | "experts agree", "insiders confirm" |
+| `conspiracy_frame` | "cover-up", "what they don't tell" |
+| `fear_trigger` | "imminent threat", "blackout" |
+| `coordinated_marker` | "spread the word", "share this before" |
+
+---
+
+## Environment Variables
 
 ```bash
-curl -X POST http://localhost:8000/analyze \
+# .env (copy from .env.example — never commit)
+GEMINI_API_KEY=AIzaSy...   # Optional — can be passed per-request instead
+```
+
+> **Security:** The API key is passed per-request from the frontend — no server-side storage required. The `.env` file is for local development convenience only.
+
+---
+
+## Test with cURL
+
+```bash
+# Health check
+curl http://localhost:8000/api/health
+
+# Full analysis (replace API key)
+curl -X POST http://localhost:8000/api/analyze \
   -H "Content-Type: application/json" \
-  -d '{"text": "The shocking truth they dont want you to know: our people are being erased."}'
+  -d '{
+    "text": "Wake up people! The deep state is orchestrating a collapse. Share immediately before it gets deleted.",
+    "api_key": "YOUR_GEMINI_KEY"
+  }'
+
+# Works without API key (uses statistical + DB pattern fallback)
+curl -X POST http://localhost:8000/api/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Wake up people! The deep state...", "api_key": ""}'
 ```
 
 ---
 
-## WHAT YOUR TEAMMATE NEEDS TO BUILD
+## Performance Targets
 
-### gemini_layer.py
-Must export: `analyze_with_gemini(text: str, pre_score: float) -> dict`
-Return schema must be identical to `ollama_layer.analyze_with_ollama()`:
-```python
-{
-  "ai_probability": int,
-  "manipulation_score": int,
-  "flagged_phrases": [{"phrase", "reason", "severity"}],
-  "narrative_technique": str,
-  "confidence": str,   # "low" | "medium" | "high"
-  "summary": str,
-}
-```
-
-### db_matcher.py
-Must export: `match_patterns(text: str) -> list[dict]`
-Each dict must have:
-```python
-{
-  "phrase": str,
-  "category": str,
-  "catLabel": str,
-  "catClass": str,    # "emo" | "uvt" | "fur" | "fau"
-  "severity": str,    # "HIGH" | "MED" | "LOW"
-  "char_start": int,
-  "char_end": int,
-  "source": "db",
-  "reason": str,
-}
-```
+| Metric | Target | Notes |
+|---|---|---|
+| Layer 1 (stats) | < 50ms | Pure Python, no API |
+| Layer 2 (Gemini) | < 2s | Gemini 2.0 Flash free tier |
+| Layer 2 (Ollama) | < 5s | Local model, hardware-dependent |
+| Layer 3 (DB) | < 10ms | SQLite indexed lookup |
+| **End-to-end** | **< 3s** | With Gemini |
 
 ---
 
-## CONNECT TO REACT FRONTEND
+## Demo Flow for Judges
 
-In your React app, replace mock data calls with:
-```javascript
-const response = await fetch('http://localhost:8000/analyze', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ text: inputText })
-});
-const result = await response.json();
+```bash
+# Terminal 1: Start backend
+cd backend && uv sync && uv run uvicorn main:app --reload --port 8000
+
+# Terminal 2: Start frontend
+cd .. && npm run dev
+
+# Open http://localhost:3000
+# 1. Click the demo case "Deepfake Transcript"
+# 2. Add your Gemini API key (click the status button)
+# 3. Click ANALYZE NARRATIVE
+# 4. Watch the gauge hit 80%+, phrases light up red
+# 5. Show /docs for technical credibility
 ```
-
-The response shape is identical to the DEMOS mock data — no frontend changes needed.
-
----
-
-## DEMO FLOW FOR JUDGES
-
-1. Start Ollama: `ollama serve`
-2. Start API:    `uvicorn main:app --reload`
-3. Open React frontend
-4. Paste HIGH RISK text → watch live results
-5. Show http://localhost:8000/docs for technical credibility
