@@ -1,0 +1,12 @@
+# ── Python dependencies ─────────────────────────────────────────────────────
+# Install all with: pip install -r requirements.txt
+
+fastapi==0.111.0
+uvicorn==0.29.0
+
+# Optional — only needed if you add textstat for richer metrics
+# textstat==0.7.3
+
+# Your teammate needs these for her modules:
+# google-generativeai==0.5.4   ← for gemini_layer.py
+# python-dotenv==1.0.1         ← for .env API key loading

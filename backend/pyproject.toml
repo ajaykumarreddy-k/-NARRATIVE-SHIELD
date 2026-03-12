@@ -1,0 +1,61 @@
+[project]
+name = "narrativeshield"
+version = "1.0.0"
+description = "AI-Powered Disinformation Detection Platform — SciComp v2.0"
+authors = [
+    { name = "Ajay Kumar Reddy", email = "ajaykumarreddykrishnareddygari@gmail.com" },
+    { name = "Thanvarshini VR",  email = "thanu2562005@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.11"
+
+dependencies = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.29.0",
+]
+
+[project.optional-dependencies]
+# Your layer — richer statistical metrics (optional, stdlib is enough without)
+stats = [
+    "textstat>=0.7.3",
+]
+
+# Teammate's layer — Gemini API + DB
+gemini = [
+    "google-generativeai>=0.5.4",
+    "python-dotenv>=1.0.1",
+]
+
+# Install everything: uv sync --all-extras
+all = [
+    "textstat>=0.7.3",
+    "google-generativeai>=0.5.4",
+    "python-dotenv>=1.0.1",
+]
+
+[project.scripts]
+narrativeshield = "main:app"
+
+[build-system]
+requires      = ["hatchling"]
+build-backend = "hatchling.build"
+
+# ── uv settings ───────────────────────────────────────────────────────────────
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0.0",
+    "httpx>=0.27.0",       # for FastAPI test client
+    "ruff>=0.4.0",         # linter
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["parser"]
+
+# ── ruff linter (optional but nice) ──────────────────────────────────────────
+[tool.ruff]
+line-length    = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
