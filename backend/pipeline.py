@@ -22,13 +22,13 @@ import string
 from typing import Any
 
 from statistical_engine import compute_statistical_score
-from ollama_layer import analyze_with_ollama
+from ollama_layer import analyze_with_ollama, _get_available_models
 
 # ── Try to import teammate's modules — graceful fallback if not ready yet ──
 try:
     from db_matcher import match_patterns
     DB_AVAILABLE = True
-    print("[Pipeline] db_matcher loaded OK")
+    print("[Pipeline] ✓ db_matcher loaded")
 except ImportError:
     DB_AVAILABLE = False
     print("[Pipeline] db_matcher not found — using inline pattern fallback")
@@ -36,10 +36,25 @@ except ImportError:
 try:
     from gemini_layer import analyze_with_gemini
     GEMINI_AVAILABLE = True
-    print("[Pipeline] gemini_layer loaded OK")
+    print("[Pipeline] ✓ gemini_layer loaded")
 except ImportError:
     GEMINI_AVAILABLE = False
     print("[Pipeline] gemini_layer not found — using Ollama only")
+
+# ── Detect what LLM is available right now ────────────────────────────────────
+def _get_llm_mode() -> str:
+    """
+    Returns which LLM backend is available:
+      'gemini'  — teammate's Gemini API is loaded and presumably has a key
+      'ollama'  — local Ollama is running with at least one model
+      'offline' — neither available, stat-only fallback
+    """
+    if GEMINI_AVAILABLE:
+        return "gemini"
+    models = _get_available_models()
+    if models:
+        return "ollama"
+    return "offline"
 
 
 # ── INLINE PATTERN FALLBACK (used if db_matcher.py not ready) ────────────────
@@ -230,15 +245,23 @@ def analyze_text(text: str) -> dict[str, Any]:
     pre_score = l1["pre_score"]
     print(f"[Pipeline] Layer 1 pre_score: {pre_score}")
 
-    # ── LAYER 2: LLM Analysis (Ollama or Gemini) ──────────────────────────
-    print("[Pipeline] Layer 2: LLM analysis...")
-    if GEMINI_AVAILABLE:
+    # ── LAYER 2: LLM Analysis ─────────────────────────────────────────────
+    llm_mode = _get_llm_mode()
+    print(f"[Pipeline] Layer 2: LLM mode = {llm_mode}")
+
+    if llm_mode == "gemini":
         l2 = analyze_with_gemini(text, pre_score=pre_score)
         l2_source = "gemini"
-    else:
+    elif llm_mode == "ollama":
         l2 = analyze_with_ollama(text, pre_score=pre_score)
         l2_source = l2.get("_source", "ollama")
-    print(f"[Pipeline] Layer 2 done. AI prob: {l2['ai_probability']}, Manip: {l2['manipulation_score']}")
+    else:
+        # fully offline — stat fallback already inside ollama_layer
+        from ollama_layer import _statistical_fallback
+        l2 = _statistical_fallback(pre_score, text)
+        l2_source = "offline"
+
+    print(f"[Pipeline] Layer 2 done [{l2_source}] — AI:{l2['ai_probability']} Manip:{l2['manipulation_score']}")
 
     # ── LAYER 3: Pattern DB Matching ──────────────────────────────────────
     print("[Pipeline] Layer 3: Pattern matching...")

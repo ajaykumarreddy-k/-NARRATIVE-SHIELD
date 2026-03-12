@@ -30,6 +30,8 @@ from typing import Any
 OLLAMA_BASE   = "http://localhost:11434"
 TIMEOUT_SEC   = 30          # increase to 60 for 8b on slow machines
 PREFERRED_MODELS = [        # tried in order — first available wins
+    "qwen2.5",              # your primary — fast + good JSON
+    "qwen3",                # your secondary — 8b, more accurate
     "llama3.2",
     "llama3.1",
     "mistral",
@@ -44,7 +46,9 @@ PREFERRED_MODELS = [        # tried in order — first available wins
 
 SYSTEM_PROMPT = """You are a disinformation forensics analyst specialising in detecting AI-generated malign content.
 
-Analyze the provided text and return ONLY a valid JSON object. Do not include any explanation, markdown, or text outside the JSON.
+/no_think
+
+Analyze the provided text and return ONLY a valid JSON object. No thinking. No explanation. No markdown. No text outside the JSON.
 
 Return exactly this structure:
 {
@@ -65,7 +69,8 @@ Scoring guide:
 - flag MED severity: fake authority, vague claims, emotional amplification
 - flag LOW severity: slightly loaded language, mild urgency
 - narrative_technique examples: "Fear Mongering", "Tribal Framing", "False Urgency", "Fake Authority", "Conspiracy Framing", "Implied Threat", "None Detected"
-"""
+
+IMPORTANT: Output ONLY the JSON object. First character must be {. Last character must be }."""
 
 def _user_prompt(text: str, pre_score: float) -> str:
     return f"""Statistical pre-analysis score: {pre_score}/100 (higher = more LLM-like patterns detected).
@@ -114,9 +119,10 @@ def _call_ollama(model: str, system: str, user: str) -> str:
         ],
         "stream": False,
         "options": {
-            "temperature": 0.1,     # low temp = more deterministic JSON
+            "temperature": 0.1,     # low temp = deterministic JSON
             "top_p": 0.9,
-            "num_predict": 512,     # enough for our JSON schema
+            "num_predict": 800,     # enough for full JSON schema
+            "think": False,         # disable qwen3 thinking mode
         }
     }).encode("utf-8")
 
