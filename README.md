@@ -263,8 +263,8 @@ Full interactive docs at **`http://localhost:8000/docs`**
 
 | Name | Role | Institution |
 |---|---|---|
-| **Ajay Kumar Reddy Krishnareddygari** | Backend · AI Pipeline · DB | SRMIST RMP |
-| **Thanvarshini VR** | Frontend · UI/UX · Integration | SRMIST RMP |
+| **Ajay Kumar Reddy Krishnareddygari** | Backend · AI Pipeline · Frontend · UI/UX | SRMIST RMP |
+| **Thanvarshini VR** | DB · FastApi | SRMIST RMP |
 
 **Hackathon:** SciComp v2.0 · National Level · SIMATS Engineering, Chennai · 12 March 2026  
 **Problem:** #06 · Cybersecurity Sub-domain · 5-Hour Sprint
